@@ -2,115 +2,90 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Stream Subtitles</title>
     <style>
         body {
-            background-color: transparent;
+            background: transparent; /* Прозрачный фон */
             margin: 0;
+            padding: 0;
             overflow: hidden;
-            font-family: 'Arial', sans-serif;
+            font-family: 'Segoe UI', sans-serif;
         }
-
-        #subtitle-container {
+        #container {
             display: flex;
             flex-direction: column;
             justify-content: flex-end;
-            align-items: center;
             height: 100vh;
-            padding-bottom: 20px;
+            align-items: center;
+            padding-bottom: 30px;
         }
-
-        #text {
-            color: white;
-            font-size: 32px;
-            font-weight: bold;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8), 
-                         -2px -2px 4px rgba(0, 0, 0, 0.8), 
-                         2px -2px 4px rgba(0, 0, 0, 0.8), 
-                         -2px 2px 4px rgba(0, 0, 0, 0.8);
-            background-color: rgba(0, 0, 0, 0.4);
-            padding: 10px 20px;
-            border-radius: 10px;
+        #box {
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 12px;
+            padding: 15px 25px;
             text-align: center;
-            max-width: 80%;
-            min-height: 40px;
-            /* Плавное появление текста */
-            transition: opacity 0.5s ease-in-out;
-            opacity: 0;
+            max-width: 85%;
+            border: 1px solid rgba(255,255,255,0.2);
         }
-
-        .visible {
-            opacity: 1 !important;
-        }
+        .ru { font-size: 18px; color: #bbb; margin-bottom: 5px; font-style: italic; }
+        .en { font-size: 32px; color: #00ffcc; font-weight: bold; text-shadow: 2px 2px 4px #000; }
+        #status { color: red; font-size: 20px; position: fixed; top: 10px; left: 10px; }
     </style>
 </head>
 <body>
+    <div id="status"></div>
+    <div id="container">
+        <div id="box">
+            <div id="ru" class="ru">Ожидание звука...</div>
+            <div id="en" class="en">Listening to Quddix...</div>
+        </div>
+    </div>
 
-<div id="subtitle-container">
-    <div id="text">Начните говорить...</div>
-</div>
+    <script>
+        const ruBox = document.getElementById('ru');
+        const enBox = document.getElementById('en');
+        const status = document.getElementById('status');
 
-<script>
-    const textElement = document.getElementById('text');
-    let recognition;
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        
+        if (!SpeechRecognition) {
+            status.innerText = "ОШИБКА: OBS не поддерживает Speech API. См. инструкцию ниже!";
+        }
 
-    if ('webkitSpeechRecognition' in window) {
-        recognition = new webkitSpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'ru-RU';
+        const rec = new SpeechRecognition();
+        rec.lang = 'ru-RU';
+        rec.continuous = true;
+        rec.interimResults = true;
 
-        recognition.onresult = async (event) => {
-            let interimTranscript = '';
-            let finalTranscript = '';
-
+        rec.onresult = async (event) => {
+            let final = '';
             for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) {
-                    finalTranscript += event.results[i][0].transcript;
-                } else {
-                    interimTranscript += event.results[i][0].transcript;
-                }
+                if (event.results[i].isFinal) final = event.results[i][0].transcript;
             }
-
-            const query = finalTranscript || interimTranscript;
-            if (query.length > 2) {
-                const translated = await translateText(query);
-                showSubtitles(translated);
+            
+            if (final) {
+                ruBox.innerText = final;
+                // Перевод
+                try {
+                    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(final)}&langpair=ru|en`);
+                    const data = await res.json();
+                    enBox.innerText = data.responseData.translatedText;
+                } catch (e) { console.error(e); }
             }
         };
 
-        recognition.onerror = (event) => console.error("Speech error:", event.error);
-        recognition.onend = () => recognition.start(); // Перезапуск при остановке
+        rec.onerror = (e) => {
+            if (e.error === 'not-allowed') {
+                status.innerText = "НУЖЕН КЛИК: Нажми 'Взаимодействовать' и кликни здесь!";
+            }
+        };
 
-        recognition.start();
-    } else {
-        textElement.innerText = "Speech API не поддерживается в этом браузере";
-    }
-
-    async function translateText(text) {
-        try {
-            const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ru&tl=en&dt=t&q=${encodeURI(text)}`;
-            const response = await fetch(url);
-            const data = await response.json();
-            return data[0][0][0];
-        } catch (e) {
-            return text; // Если ошибка, вернет оригинал
-        }
-    }
-
-    let timeout;
-    function showSubtitles(content) {
-        textElement.innerText = content;
-        textElement.classList.add('visible');
-
-        // Очистка предыдущего таймера, чтобы текст не исчезал слишком быстро
-        clearTimeout(timeout);
-        // Субтитры висят 4 секунды (настройте под себя)
-        timeout = setTimeout(() => {
-            textElement.classList.remove('visible');
-        }, 4000);
-    }
-</script>
-
+        rec.onend = () => rec.start();
+        
+        // Запуск при клике (через 'Взаимодействовать' в OBS)
+        document.body.onclick = () => {
+            rec.start();
+            status.innerText = "";
+        };
+    </script>
 </body>
 </html>
